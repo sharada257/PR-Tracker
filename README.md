@@ -1,11 +1,16 @@
 # PR Tracker
 
-A personal GitHub pull-request tracker and analytics dashboard.
+An organization-level GitHub pull-request tracker and analytics platform.
 
-It imports the PRs **you authored**, keeps them in sync through GitHub webhooks (plus a periodic safety-net
-reconciliation), and gives you a searchable, filterable history with reviewer information, per-PR timelines and
-engineering metrics. **GitHub is the source of truth**; this app only reads from it and never modifies anything on
-GitHub.
+Install the GitHub App on your organization, and everyone who can see it signs in with GitHub. PR Tracker imports the
+pull requests and reviews in the repositories the app can access, keeps them in sync through GitHub webhooks (plus a
+periodic safety-net reconciliation), and gives each person a searchable, filterable history with reviewer information,
+per-PR timelines and engineering metrics. Admins also get organization-wide views, member management and Slack
+notifications. **GitHub is the source of truth**; this app only reads from it and never modifies anything on GitHub.
+
+## Demo
+
+[Watch the demo video](https://github.com/sharada257/PR-Tracker/releases/tag/demo-video-2026-10-02)
 
 | Layer | Tech |
 |---|---|
@@ -18,10 +23,17 @@ GitHub.
 
 - **Multi-user organizations powered by a GitHub App.** An organization installs the app once; everyone who can see that installation on GitHub signs in with GitHub and lands in the organization. GitHub stays the source of truth: PR Tracker never copies repository permissions, it only syncs and shows repositories the installation can access. There are no personal access tokens.
 - **Roles**: the person who installs the GitHub App on an organization becomes its **Admin** (if the installer is unknown, the first person to sign in does); everyone after is a **Member**. A user in several organizations picks one after signing in, and anyone can use **Set up PRLens** (login screens) to install the App on another organization; GitHub decides who may install.
-  - **Members** see only their own PRs, reviews and analytics (Analytics, Pull Requests, My Reviews) and can press *Sync GitHub*.
-  - **Admins** see all of that, plus a **Viewing** filter on Analytics, Pull Requests and My Reviews: *Me*, *Everyone*, or any single member (their dashboard, PRs and pending reviews as they would see them). The **Admin** sidebar group adds an **Organization** dashboard (organization-wide numbers and a per-member table of PRs created / merged / open, reviews given and pending reviews) and a **Members** page (promote or demote admins, remove or restore someone's access). Admins also choose which repositories are tracked, re-import history and see the GitHub connection / webhook status in Settings.
+  - **Members** see only their own PRs, reviews and analytics (Analytics, Pull Requests, My Reviews) and can press *Sync GitHub* to refresh.
+  - **Admins** see all of that, plus a **Viewing** filter on Analytics, Pull Requests and My Reviews: *Me*, *Everyone*, or any single member (their dashboard, PRs and pending reviews as they would see them). The **Admin** sidebar group adds:
+    - **Organization**: organization-wide numbers and a per-member table of PRs created / merged / open, reviews given and pending reviews (with search and pagination).
+    - **Members**: search and paginate the member list, change someone between Admin and Member inline, and remove or restore their access. Role changes and removals each ask for a second confirmation.
+    - **Requests**: approve or deny access requests from people who were removed (a badge shows how many are pending).
+    - **Slack**: connect Slack and manage notifications (see "Slack setup").
+
+    Only admins choose which repositories are tracked, run a full re-import (`full: true`) and see the GitHub connection / webhook status in Settings.
   - This is enforced on the server: a member asking for `scope=all` or another person's `member=` gets 403. An organization always keeps at least one admin, and nobody can remove their own access. Removing someone is sticky (signing in again does not bring them back); losing access on GitHub revokes automatically and regaining it restores automatically.
-- **No access?** A user whose GitHub account is not part of any installation signs in but sees: "PRLens does not currently have access to the repositories available to you. Please contact your GitHub organization administrator."
+- **No access?** A user whose GitHub account is not part of any installation signs in but sees: "PRLens does not currently have access to the repositories available to you. Please contact your GitHub organization administrator." They can also use **Set up PRLens** to install the app on a new organization.
+- **Removed by an admin?** The user lands on a page saying their access was removed, with an optional message box and a **Request access** button (one open request per organization). The page updates by itself when an admin decides. Admins handle requests under **Admin -> Requests**; approving restores the person as a plain **Member**, whatever role they had before.
 - **Repository selection** (admins): every repository the installation can access starts tracked; admins can switch some off.
 - **Resumable historical import** - progress is checkpointed after every PR, so a crash, rate limit or restart resumes where it stopped.
 - **Webhooks** (`pull_request`, `pull_request_review`, `installation`, `installation_repositories`): signature-checked, stored, queued, processed asynchronously and idempotently (per delivery ID).
@@ -78,6 +90,12 @@ Starts Postgres, Redis, the Django API (gunicorn), a Celery worker, Celery beat 
 React build and proxying `/api`. Put a TLS-terminating proxy in front of it in production; with plain
 `http://localhost:8080` set `HTTPS_ONLY=0` so secure cookies and the HTTPS redirect do not get in the way.
 
+### Django admin
+
+`/admin/` (for example <http://localhost:8000/admin/>, or `/admin/` on the same origin in Docker) is the Django admin
+for inspecting organizations, memberships, access requests, sync jobs and webhook events. Create a login with
+`python manage.py createsuperuser`.
+
 ## GitHub setup
 
 Create one GitHub App at <https://github.com/settings/apps/new> (PR Tracker has no other way to read GitHub):
@@ -115,7 +133,7 @@ Slack sends each reviewer a direct message when someone asks for their review, p
 again" message when asked again. The author gets "PR approved" / "Changes requested", and a reviewer who asked for
 changes gets "Changes pushed" when the author pushes after their feedback (switch these off with **Review outcomes**
 under **Slack -> What gets sent**). Admins connect it under
-**Organization -> Slack**. The GitHub App must be subscribed to the **Pull request** and **Pull request review** events.
+**Admin -> Slack**. The GitHub App must be subscribed to the **Pull request** and **Pull request review** events.
 
 1. Create a Slack App at <https://api.slack.com/apps> (*From scratch*) in your workspace.
 2. **OAuth & Permissions** -> *Bot Token Scopes*: `chat:write`, `im:write`, `users:read`, `users:read.email`.
@@ -172,10 +190,15 @@ All endpoints require a signed-in session and are scoped to the user's active or
 | `GET /api/repositories` · `POST /api/repositories/select` · `PATCH /api/repositories/:id` | Repository list / choose what to track (select and patch are admin-only) |
 | `GET /api/my-reviews?date_from=&date_to=&repository=&status=&author=&q=&page=` | Your pending reviews, review activity and review table |
 | `GET /api/reviewers` · `GET /api/labels` · `GET /api/filters` | Reviewer activity, labels, dropdown options |
-| `POST /api/github/sync` | "Sync GitHub": discover repositories and refresh now (`{"full": true}` re-imports; admin-only) |
+| `POST /api/github/sync` | "Sync GitHub": discover repositories and refresh now (any member; `{"full": true}` re-imports and is admin-only) |
 | `GET /api/import/status` · `GET /api/github/webhook-info` | Sync progress, latest sync summary, last synced · GitHub connection and webhook info (admin-only) |
 | `GET /api/organization/members` · `PATCH /api/organization/members/:user_id` (`role`, `active`) · `GET /api/organization/overview` | Admin-only: member list and management, per-member activity table |
+| `GET /api/organization/access-requests` · `PATCH /api/organization/access-requests/:id` (`decision`: `approve` or `deny`) | Admin-only: list and decide access requests |
 | `GET /api/auth/me` · `POST /api/auth/organization` | Session, active organization and role · switch organization |
+| `GET /api/auth/config` · `GET /api/auth/github/login` · `GET /api/auth/github/callback` · `GET /api/auth/github/install` · `POST /api/auth/logout` · `POST /api/auth/demo` (demo only) | Sign-in, "Set up PRLens" install redirect, sign-out |
+| `POST /api/auth/access-request` | A removed user asks the admins to let them back in |
+| `GET /api/auth/audit` | Audit log shown in Settings |
+| `GET /api/slack` · `GET /api/slack/connect` · `GET /api/slack/callback` · `GET /api/slack/links` · `PATCH /api/slack/links/:user_id` · `POST /api/slack/auto-match` · `POST /api/slack/test` | Slack connection, settings, people matching, test message (admin-only except the OAuth callback) |
 | `POST /api/webhooks/github` | GitHub webhook receiver |
 
 Multi-valued filters take comma-separated values (`status=merged,closed`).
@@ -196,7 +219,8 @@ cd backend && python manage.py test --settings=config.test_settings
 
 Covers the sync engine (idempotency, reviewer history, status & cycle rules), resumable import and reconciliation,
 the webhook endpoint (signatures, duplicates, redelivery, ordering, ignored events), the filter / search / statistics
-APIs, GitHub sign-in and membership / role rules, organization sync jobs and installation webhooks, and authorisation boundaries.
+APIs, GitHub sign-in and membership / role rules, access requests, organization sync jobs and installation webhooks,
+Slack matching and notification rules, and authorisation boundaries (including cross-organization isolation).
 
 ## Project layout
 
@@ -207,13 +231,16 @@ backend/
   apps/github/       API client, auth (App JWT / installation tokens), normalisation,
                      installations, SyncJobs, sync engine, webhook receiver + processing, Celery tasks
   apps/tracker/      models, metrics & status rules, filters, statistics, timeline, REST API
+  apps/slack/        Slack OAuth, encrypted bot token, user links, notification dispatch & reminders
 frontend/src/
   components/ui/     shadcn/ui components
-  pages/             Analytics (home), PRs, PR detail, My Reviews, Repositories, Reviewers (hidden), Settings
+  pages/             Login, ChooseOrganization, NoAccess, Analytics (home), PRs, PR detail, My Reviews,
+                     Repositories, Settings, Reviewers (hidden), and admin-only Organization, Members,
+                     Requests, Slack
 ```
 
 ## Roadmap
 
-Notifications (Slack / email), PR-aging alerts and an AI query layer are intentionally out of the MVP. The
+Slack notifications are built. Email notifications, PR-aging alerts and an AI query layer are still out of scope. The
 structured API and filter layer are designed so an assistant can answer questions by calling the same filtered
 endpoints rather than touching the database directly.
