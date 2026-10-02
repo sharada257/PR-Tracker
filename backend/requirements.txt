@@ -1,0 +1,12 @@
+Django>=4.2,<4.3
+djangorestframework>=3.15,<3.16
+psycopg2-binary>=2.9
+dj-database-url>=2.1
+python-dotenv>=1.0
+celery>=5.3,<5.5
+redis>=5.0
+requests>=2.31
+PyJWT[crypto]>=2.8
+cryptography>=42
+whitenoise>=6.6
+gunicorn>=21.2

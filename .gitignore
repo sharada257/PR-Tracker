@@ -1,0 +1,16 @@
+# secrets & local state
+.env
+*.pem
+.devdata/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+backend/staticfiles/
+
+# node
+node_modules/
+frontend/dist/
+
+.DS_Store

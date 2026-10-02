@@ -1,0 +1,56 @@
+# Full stack: Postgres, Redis, Django (gunicorn), Celery worker + beat, and an nginx-served React app.
+#
+#   cp .env.example .env   # fill in the GitHub values and DJANGO_SECRET_KEY
+#   docker compose up --build
+#
+# Put a TLS-terminating proxy in front of the `web` service (port 8080) in production.
+x-backend: &backend
+  build: ./backend
+  env_file: .env
+  environment:
+    DATABASE_URL: postgres://prtracker:prtracker@db:5432/prtracker
+    REDIS_URL: redis://redis:6379/0
+    DJANGO_DEBUG: "0"
+  depends_on:
+    db: { condition: service_healthy }
+    redis: { condition: service_started }
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: prtracker
+      POSTGRES_PASSWORD: prtracker
+      POSTGRES_DB: prtracker
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prtracker"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  backend:
+    <<: *backend
+    command: sh -c "python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --access-logfile -"
+
+  worker:
+    <<: *backend
+    command: celery -A config worker -l info --concurrency 2
+
+  beat:
+    <<: *backend
+    command: celery -A config beat -l info
+
+  web:
+    build: ./frontend
+    depends_on: [backend]
+    ports: ["8080:80"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
